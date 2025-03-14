@@ -1,1 +1,186 @@
+import discord
+from discord.ext import commands
+from dotenv import load_dotenv
+import os
 
+from keep_alive import keep_alive
+
+keep_alive()
+
+# Load environment variables
+load_dotenv()
+TOKEN = os.getenv("TOKEN")
+
+if not TOKEN:
+    print("❌ Error: Bot token is missing! Set it in the .env file.")
+    exit()
+
+# Bot configuration
+intents = discord.Intents.default()
+intents.messages = True
+intents.guilds = True
+intents.members = True  # Required for member events
+intents.message_content = True  # Required for reading messages
+
+bot = commands.Bot(command_prefix="?", intents=intents)
+
+# ✅ Remove default help command to avoid conflict
+bot.remove_command("help")
+
+
+# 📌 Event: Bot is ready
+@bot.event
+async def on_ready():
+    print(f'✅ Logged in as {bot.user}')
+    print(f'📌 Bot Prefix: {bot.command_prefix}')
+    print(f'📡 Connected to {len(bot.guilds)} servers!')
+
+
+# 📌 Event: Welcome message
+@bot.event
+async def on_member_join(member):
+    channel = discord.utils.get(member.guild.text_channels, name="welcome")
+    if not channel:
+        channel = await member.guild.create_text_channel("welcome")
+
+    await channel.send(f'🎉 Welcome {member.mention} to {member.guild.name}!')
+
+
+# 📌 Event: Leave message
+@bot.event
+async def on_member_remove(member):
+    channel = discord.utils.get(member.guild.text_channels, name="goodbye")
+    if not channel:
+        channel = await member.guild.create_text_channel("goodbye")
+
+    await channel.send(f'😢 {member.name} has left the server. Goodbye!')
+
+
+# 📌 Command: Custom Help
+@bot.command(name="help", help="Shows all available commands.")
+async def helpme(ctx):
+    """Displays a list of all commands with descriptions."""
+    embed = discord.Embed(title="📜 Available Commands", color=discord.Color.red())
+
+    for command in bot.commands:
+        embed.add_field(
+            name=f"{bot.command_prefix}{command.name}",
+            value=command.help or "No description available",
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
+
+# 📌 Command: Server Info
+@bot.command(help="Displays information about the server.")
+async def serverinfo(ctx):
+    """Shows server name, ID, owner, member count, and creation date."""
+    guild = ctx.guild
+    embed = discord.Embed(title=f"🌍 Server Info - {guild.name}", color=discord.Color.green())
+    embed.add_field(name="🆔 Server ID", value=guild.id, inline=True)
+    embed.add_field(name="👑 Owner", value=guild.owner, inline=True)
+    embed.add_field(name="👥 Members", value=guild.member_count, inline=True)
+    embed.add_field(name="📅 Created On", value=guild.created_at.strftime("%Y-%m-%d"), inline=True)
+
+    await ctx.send(embed=embed)
+
+
+# 📌 Command: User Info
+@bot.command(help="Displays information about a specific user.")
+async def userinfo(ctx, member: discord.Member = None):
+    """Shows user ID, join date, and account creation date."""
+    member = member or ctx.author
+    embed = discord.Embed(title=f"👤 User Info - {member.name}", color=discord.Color.purple())
+    embed.add_field(name="🆔 User ID", value=member.id, inline=True)
+    embed.add_field(name="📆 Joined Server", value=member.joined_at.strftime("%Y-%m-%d"), inline=True)
+    embed.add_field(name="📅 Created Account", value=member.created_at.strftime("%Y-%m-%d"), inline=True)
+
+    await ctx.send(embed=embed)
+
+
+# 📌 Command: Kick User
+@bot.command(help="Kicks a user from the server.")
+@commands.has_permissions(kick_members=True)
+async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
+    """Allows a moderator to kick a user."""
+    await member.kick(reason=reason)
+    await ctx.send(f'🚨 {member.mention} has been kicked! Reason: {reason}')
+
+
+# 📌 Command: Ban User
+@bot.command(help="Bans a user from the server.")
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
+    """Allows a moderator to ban a user."""
+    await member.ban(reason=reason)
+    await ctx.send(f'🚫 {member.mention} has been banned! Reason: {reason}')
+
+
+# 📌 Command: Unban User
+@bot.command(help="Unbans a previously banned user.")
+@commands.has_permissions(ban_members=True)
+async def unban(ctx, *, member_name):
+    """Allows a moderator to unban a user."""
+    banned_users = await ctx.guild.bans()
+    for ban_entry in banned_users:
+        user = ban_entry.user
+        if user.name == member_name:
+            await ctx.guild.unban(user)
+            await ctx.send(f'✅ {user.mention} has been unbanned.')
+            return
+    await ctx.send(f'⚠️ User {member_name} was not found in the banned list.')
+
+
+# 📌 Command: Purge Messages (Renamed from Clear)
+@bot.command(help="Purges a specified number of messages.")
+@commands.has_permissions(manage_messages=True)
+async def purge(ctx, amount: int = 10):
+    """Deletes messages in the channel. Default is 10 messages."""
+    await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f'🗑️ Purged {amount} messages.', delete_after=3)
+
+
+# 📌 Command: Purge Messages from a Specific User
+@bot.command(help="Deletes a specified number of messages from a specific user.")
+@commands.has_permissions(manage_messages=True)
+async def purgeuser(ctx, member: discord.Member, amount: int = 10):
+    """Deletes messages from a specific user in the channel."""
+    def check(msg):
+        return msg.author == member and not msg.pinned  # Avoid deleting pinned messages
+    
+    deleted = await ctx.channel.purge(limit=amount + 1, check=check)
+    await ctx.send(f'🗑️ Purged {len(deleted) - 1} messages from {member.mention}.', delete_after=3)
+
+
+# ✅ Error Handling: Missing Permissions
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ You don't have permission to use this command!")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("⚠️ Missing arguments! Please check the command usage.")
+    elif isinstance(error, commands.CommandNotFound):
+        await ctx.send("❌ Command not found! Use `?help` to see available commands.")
+    else:
+        raise error
+
+from flask import Flask
+from threading import Thread
+from waitress import serve
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_web():
+    serve(app, host="0.0.0.0", port=8080)
+
+ # Use waitress instead of Flask's built-in server
+
+Thread(target=run_web).start()
+
+# 🚀 Run the bot
+bot.run(TOKEN)
